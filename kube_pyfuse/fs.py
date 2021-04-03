@@ -4,8 +4,6 @@ import errno
 
 import fuse
 
-fuse.fuse_python_api = (0, 2)
-
 hello_path = '/hello'
 hello_str = b'Hello World!\n'
 
@@ -46,13 +44,3 @@ class HelloFS(fuse.Fuse):
         else:
             buf = b''
         return buf
-
-
-def main():
-    server = HelloFS(version="%prog " + fuse.__version__, dash_s_do='setsingle')
-    server.parse(errex=1)
-    server.main()
-
-
-if __name__ == '__main__':
-    main()
