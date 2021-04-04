@@ -1,3 +1,4 @@
+import itertools
 from collections.abc import Iterable
 
 import fuse
@@ -24,6 +25,8 @@ class KubeFS(fuse.Fuse):
         elif len(path_parts) == 2:
             cls = node.ResourceGroupNode
         elif len(path_parts) == 3:
+            cls = node.KindNode
+        elif len(path_parts) == 4:
             cls = node.ObjectNode
         else:
             cls = node.Node
@@ -31,14 +34,11 @@ class KubeFS(fuse.Fuse):
         return cls(path_parts, self.kube)
 
     def readdir(self, path, offset):
-        node = self._path2node(path)
-        ret = node.readdir()
-        if isinstance(ret, Iterable):
-            yield fuse.Direntry('.')
-            yield fuse.Direntry('..')
-            yield from ret
-        else:
-            return ret
+        n = self._path2node(path)
+        try:
+            return itertools.chain((fuse.Direntry('.'), fuse.Direntry('..')), list(n.readdir()))
+        except node.NodeError as err:
+            return -err.my_errno
 
     def getattr(self, path):
         node = self._path2node(path)

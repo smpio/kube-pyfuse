@@ -1,3 +1,6 @@
+import sys
+from collections import defaultdict
+
 import kubernetes
 
 from . import kube_config
@@ -7,8 +10,53 @@ class Kube:
     def __init__(self):
         kube_config.init()
         self.v1 = kubernetes.client.CoreV1Api()
+        self.client = kubernetes.client.ApiClient()
 
-    def list_namespaces(self):
-        result = self.v1.list_namespace()
-        for ns in result.items:
-            yield ns.metadata.name
+        dynamic_client = kubernetes.dynamic.DynamicClient(client=self.client)
+        self.discoverer = kubernetes.dynamic.EagerDiscoverer(
+            client=dynamic_client,
+            cache_file=None,
+        )
+        self._load_resource_groups()
+
+    def _load_resource_groups(self):
+        api_groups = self.discoverer.parse_api_groups()
+        self.namespaced_resources = defaultdict(dict)
+        self.global_resources = defaultdict(dict)
+        for api_group in api_groups.values():
+            for resource_group_name, resource_group_versions in api_group.items():
+                for resource_group_version, resource_group in resource_group_versions.items():
+                    if not resource_group.preferred:
+                        continue
+                    for kind, resource_list in resource_group.resources.items():
+                        if len(resource_list) != 1:
+                            print('Unknown resource type', resource_group_name, resource_group_version, kind,
+                                  file=sys.stderr)
+                            continue
+                        resource = resource_list[0]
+                        if getattr(resource, 'base_kind', None):
+                            continue  # skip *List resources
+                        verbs = getattr(resource, 'verbs', None) or []
+                        if 'get' in verbs and 'list' in verbs:
+                            if resource.namespaced:
+                                self.namespaced_resources[resource_group_name][kind] = resource
+                            else:
+                                self.global_resources[resource_group_name][kind] = resource
+
+    def get_resource_url(self, resource, namespace):
+        if resource.group == '':
+            url = '/api'
+        else:
+            url = '/apis/' + resource.group
+        url += '/' + resource.api_version
+        if resource.namespaced:
+            url += '/namespaces/' + namespace
+        url += '/' + resource.name
+        return url
+
+    def get_resource(self, resource, namespace, content_type='application/json'):
+        url = self.get_resource_url(resource, namespace)
+        ret = self.client.call_api(url, 'GET', header_params={
+            'Accept': content_type
+        }, auth_settings=['BearerToken'], response_type=object)
+        return ret[0]
