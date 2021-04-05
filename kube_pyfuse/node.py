@@ -1,10 +1,12 @@
-import sys
 import datetime
+import threading
 import functools
 
 import cachetools.func
 
 from .kube import kube
+from utils.kubernetes.watch import KubeWatcher, WatchEventType
+
 
 UNKNOWN = type('UNKNOWN', (), {})()
 GLOBAL_PSEUDO_NAMESPACE = '_'
@@ -33,13 +35,31 @@ class RootNode(Node):
     name = '/'
 
     def __init__(self):
-        self.children = [NamespaceNode(None)]
-        self.children += [NamespaceNode(ns) for ns in kube.v1.list_namespace().items]
-        self.children += [EmptyFileNode('.metadata_never_index')]  # prevent macOS spotlight indexing
-        # TODO: add watch thread
+        self.children = [NamespaceNode(None), EmptyFileNode('.metadata_never_index')]
+        self.update_thread = RootNodeUpdateThread(self)
+        self.update_thread.start()
 
     def get_children(self):
         return self.children
+
+
+class RootNodeUpdateThread(threading.Thread):
+    def __init__(self, node):
+        super().__init__(daemon=True)
+        self.node = node
+
+    def run(self):
+        for event_type, ns in KubeWatcher(kube.v1.list_namespace):
+            if event_type == WatchEventType.ADDED:
+                self.node.children.append(NamespaceNode(ns))
+            elif event_type == WatchEventType.DELETED:
+                def matches(node):
+                    if not isinstance(node, NamespaceNode):
+                        return False
+                    if not node.namespace:
+                        return False
+                    return ns.metadata.name == node.namespace.metadata.name
+                self.node.children = [c for c in self.node.children if not matches(c)]
 
 
 class NamespaceNode(Node):
