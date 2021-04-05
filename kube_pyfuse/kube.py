@@ -43,7 +43,7 @@ class Kube:
                             else:
                                 self.global_resources[resource_group_name][kind] = resource
 
-    def get_resource_url(self, resource, namespace, object_name):
+    def get_resource_url(self, resource, namespace):
         if resource.group == '':
             url = '/api'
         else:
@@ -52,12 +52,20 @@ class Kube:
         if resource.namespaced:
             url += '/namespaces/' + namespace
         url += '/' + resource.name
-        if object_name:
-            url += '/' + object_name
         return url
 
-    def get_resource(self, resource, namespace, object_name=None, content_type='application/json'):
-        url = self.get_resource_url(resource, namespace, object_name)
+    def get_object_url(self, resource, namespace, object_name):
+        return self.get_resource_url(resource, namespace) + '/' + object_name
+
+    def get_resource(self, resource, namespace, content_type='application/json'):
+        url = self.get_resource_url(resource, namespace)
+        return self.get_url(url, content_type=content_type)
+
+    def get_object(self, resource, namespace, object_name, content_type='application/json'):
+        url = self.get_object_url(resource, namespace, object_name)
+        return self.get_url(url, content_type=content_type)
+
+    def get_url(self, url, content_type='application/json'):
         ret = self.client.call_api(url, 'GET', header_params={
             'Accept': content_type
         }, auth_settings=['BearerToken'], response_type=object)

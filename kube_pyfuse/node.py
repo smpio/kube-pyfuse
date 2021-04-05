@@ -113,16 +113,15 @@ class KindNode(Node):
         children = []
         ns_name = self.namespace.metadata.name if self.namespace else None
         for item in kube.get_resource(self.resource, ns_name)['items']:
-            children.append(ObjectNode(item, self.resource))
+            children.append(ObjectNode(item))
         return children
 
 
 class ObjectNode(Node):
     is_dir = False
 
-    def __init__(self, obj, resource):
+    def __init__(self, obj):
         self.obj = obj
-        self.resource = resource  # TODO: extract resource from obj?
 
     @property
     def name(self):
@@ -130,8 +129,7 @@ class ObjectNode(Node):
 
     @cachetools.func.ttl_cache(ttl=3)
     def read(self):
-        text = kube.get_resource(self.resource, self.obj['metadata'].get('namespace'), self.obj['metadata']['name'],
-                                 content_type='application/yaml')
+        text = kube.get_url(self.obj['metadata']['selfLink'], content_type='application/yaml')
         return text.encode('utf8')
 
     def get_stat(self):
