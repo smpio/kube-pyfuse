@@ -12,6 +12,7 @@ UNKNOWN = type('UNKNOWN', (), {})()
 
 GLOBAL_PSEUDO_NAMESPACE = '_'
 CORE_RESOURCE_GROUP_NAME = '_'
+CACHE_TTL_SECONDS = 5
 EXCLUDE_EMPTY_KINDS = True
 EXCLUDE_EMPTY_RESOURCE_GROUPS = True
 MAX_PARALLEL_REQUESTS = 20
@@ -81,7 +82,7 @@ class NamespaceNode(Node):
         else:
             return GLOBAL_PSEUDO_NAMESPACE
 
-    @cachetools.func.ttl_cache(ttl=3)
+    @cachetools.func.ttl_cache(ttl=CACHE_TTL_SECONDS)
     def get_children(self):
         if self.namespace:
             resource_groups = kube.namespaced_resources
@@ -120,7 +121,7 @@ class ResourceGroupNode(Node):
         else:
             return CORE_RESOURCE_GROUP_NAME
 
-    @cachetools.func.ttl_cache(ttl=3)
+    @cachetools.func.ttl_cache(ttl=CACHE_TTL_SECONDS)
     def get_children(self):
         children = [KindNode(resource, self.namespace) for resource in self.resources.values()]
         if EXCLUDE_EMPTY_KINDS:
@@ -139,7 +140,7 @@ class KindNode(Node):
     def name(self):
         return self.resource.kind
 
-    @cachetools.func.ttl_cache(ttl=3)
+    @cachetools.func.ttl_cache(ttl=CACHE_TTL_SECONDS)
     def get_children(self):
         children = []
         ns_name = self.namespace.metadata.name if self.namespace else None
@@ -158,7 +159,7 @@ class ObjectNode(Node):
     def name(self):
         return self.obj['metadata']['name'] + '.yaml'
 
-    @cachetools.func.ttl_cache(ttl=3)
+    @cachetools.func.ttl_cache(ttl=CACHE_TTL_SECONDS)
     def read(self):
         text = kube.get_url(self.obj['metadata']['selfLink'], content_type='application/yaml')
         return text.encode('utf8')
