@@ -12,16 +12,18 @@ fuse.fuse_python_api = (0, 2)
 # TODO: add typing + flake checks
 
 
-class Error(Exception):
-    def __init__(self, my_errno):
-        super().__init__(my_errno)
-        self.my_errno = my_errno
+class FSError(OSError):
+    def __init__(self, errno):
+        super().__init__(errno, os.strerror(errno))
+        self.errno = errno
 
 
 class KubeFS(fuse.Fuse):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.root_node = node.RootNode()
+        self.file_class = create_kube_file_class(self)
+        self.truncated_files = {}
 
     def _path2node(self, path):
         path = path[1:]  # remove leading slash
@@ -32,20 +34,17 @@ class KubeFS(fuse.Fuse):
         n = self.root_node
         for path_part in path_parts:
             if not n.is_dir:
-                raise Error(errno.EACCES)
+                raise FSError(errno.EACCES)
             children = {child.name: child for child in n.get_children()}
             try:
                 n = children[path_part]
             except KeyError as err:
-                raise Error(errno.ENOENT) from err
+                raise FSError(errno.ENOENT) from err
 
         return n
 
     def readdir(self, path, offset):
-        try:
-            n = self._path2node(path)
-        except Error as err:
-            return -err.my_errno
+        n = self._path2node(path)
 
         if not n.is_dir:
             return -errno.EACCES
@@ -56,46 +55,113 @@ class KubeFS(fuse.Fuse):
         )
 
     def getattr(self, path):
-        try:
-            n = self._path2node(path)
-        except Error as err:
-            return -err.my_errno
+        n = self._path2node(path)
 
         st = fuse.Stat()
         if n.is_dir:
-            st.st_mode = stat.S_IFDIR | 0o755
+            st.st_mode = stat.S_IFDIR | 0o777
             st.st_nlink = 2
         else:
-            st.st_mode = stat.S_IFREG | 0o444
+            st.st_mode = stat.S_IFREG | 0o666
             st.st_nlink = 1
 
         nstat = n.get_stat()
         for k, v in nstat.items():
             setattr(st, k, v)
 
+        try:
+            size = self.truncated_files[path]
+        except KeyError:
+            pass
+        else:
+            st.st_size = size
+
         return st
 
-    def open(self, path, flags):
-        try:
-            n = self._path2node(path)
-        except Error as err:
-            return -err.my_errno
 
-        if n.is_dir:
-            return -errno.EACCES
+def create_kube_file_class(_kubefs):
+    class KubeFile:
+        kubefs = _kubefs
 
-        accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR
-        if (flags & accmode) != os.O_RDONLY:
-            return -errno.EACCES
+        def __init__(self, path, flags, *args):
+            print(hex(id(self)), 'init', path, oct(flags))
+            self.path = path
+            self.node = self.kubefs._path2node(path)
 
-    def read(self, path, size, offset):
-        try:
-            n = self._path2node(path)
-        except Error as err:
-            return -err.my_errno
+            self.is_dirty = False
+            self.buf = None
 
-        if n.is_dir:
-            return -errno.EACCES
+            if flags & os.O_TRUNC:
+                self.ftruncate(0)
 
-        data = n.read()
-        return data[offset:offset+size]
+        def _ensure_buf(self):
+            if self.buf is not None:
+                return
+
+            self.buf = self.node.read()
+            try:
+                len = self.kubefs.truncated_files[self.path]
+            except KeyError:
+                pass
+            else:
+                self.buf = self.buf[:len]
+
+        def read(self, size, offset):
+            print(hex(id(self)), 'read', size, offset)
+            self._ensure_buf()
+            return self.buf[offset:offset+size]
+
+        def write(self, buf, offset):
+            print(hex(id(self)), 'write', len(buf), offset)
+            print(repr(buf))
+            self._ensure_buf()
+            self.is_dirty = True
+            self.buf = self.buf[:offset] + buf + self.buf[offset+len(buf):]
+            self.kubefs.truncated_files.pop(self.path, None)
+            return len(buf)
+
+        def release(self, flags):
+            print(hex(id(self)), 'release')
+            # TODO: flush
+
+        def flush(self):
+            print(hex(id(self)), 'flush')
+            if not self.is_dirty:
+                return
+            # TODO: write
+            self.is_dirty = False
+
+        def fsync(self, isfsyncfile):
+            print(hex(id(self)), 'fsync')
+            # TODO: flush
+
+        def fgetattr(self):
+            print(hex(id(self)), 'getattr')
+            st = fuse.Stat()
+            st.st_mode = stat.S_IFREG | 0o666
+            st.st_nlink = 1
+
+            nstat = self.node.get_stat()
+            for k, v in nstat.items():
+                setattr(st, k, v)
+
+            if self.buf is not None:
+                st.st_size = len(self.buf)
+            else:
+                try:
+                    size = self.kubefs.truncated_files[self.path]
+                except KeyError:
+                    pass
+                else:
+                    st.st_size = size
+
+            print('st_size', st.st_size)
+            return st
+
+        def ftruncate(self, size):
+            print(hex(id(self)), 'ftruncate', size)
+            self.kubefs.truncated_files[self.path] = size
+            if self.buf is not None:
+                self.buf = self.buf[:size]
+
+    return KubeFile
