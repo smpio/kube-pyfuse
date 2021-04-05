@@ -128,15 +128,15 @@ class ObjectNode(Node):
     def name(self):
         return self.obj['metadata']['name'] + '.yaml'
 
+    @cachetools.func.ttl_cache(ttl=3)
     def read(self):
-        print('READ')
         text = kube.get_resource(self.resource, self.obj['metadata'].get('namespace'), self.obj['metadata']['name'],
                                  content_type='application/yaml')
         return text.encode('utf8')
 
     def get_stat(self):
         stat = {
-            'st_size': 100,  # TODO
+            'st_size': len(self.read()),
         }
 
         ctime_iso = self.obj['metadata'].get('creationTimestamp')
