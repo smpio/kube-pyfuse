@@ -29,8 +29,8 @@ class Kube:
                     if not resource_group.preferred:
                         continue
                     for kind, resource_list in resource_group.resources.items():
-                        if len(resource_list) != 1:
-                            print('Unknown resource type', resource_group_name, resource_group_version, kind,
+                        if not resource_list:
+                            print('No resources for', resource_group_name, resource_group_version, kind,
                                   file=sys.stderr)
                             continue
                         resource = resource_list[0]
