@@ -1,5 +1,6 @@
 import datetime
 import threading
+from multiprocessing.pool import ThreadPool
 
 import cachetools.func
 
@@ -13,6 +14,10 @@ GLOBAL_PSEUDO_NAMESPACE = '_'
 CORE_RESOURCE_GROUP_NAME = '_'
 EXCLUDE_EMPTY_KINDS = True
 EXCLUDE_EMPTY_RESOURCE_GROUPS = True
+MAX_PARALLEL_REQUESTS = 20
+
+per_resource_group_pool = ThreadPool(100)
+per_resource_pool = ThreadPool(MAX_PARALLEL_REQUESTS)
 
 
 class Node:
@@ -83,15 +88,10 @@ class NamespaceNode(Node):
         else:
             resource_groups = kube.global_resources
 
-        children = []
-        for resource_group_name, resources in resource_groups.items():
-            if not resource_group_name:
-                resource_group_name = CORE_RESOURCE_GROUP_NAME
-            node = ResourceGroupNode(resource_group_name, resources, self.namespace)
-            if EXCLUDE_EMPTY_RESOURCE_GROUPS and len(node.get_children()) == 0:
-                continue
-            children.append(node)
-
+        children = [ResourceGroupNode(resource_group_name, resources, self.namespace)
+                    for resource_group_name, resources in resource_groups.items()]
+        if EXCLUDE_EMPTY_RESOURCE_GROUPS:
+            children = _filter_empty(children, per_resource_group_pool)
         return children
 
     def get_stat(self):
@@ -108,19 +108,23 @@ class NamespaceNode(Node):
 class ResourceGroupNode(Node):
     is_dir = True
 
-    def __init__(self, name, resources, namespace):
-        self.name = name
+    def __init__(self, group_name, resources, namespace):
+        self.group_name = group_name
         self.resources = resources
         self.namespace = namespace
 
+    @property
+    def name(self):
+        if self.group_name:
+            return self.group_name
+        else:
+            return CORE_RESOURCE_GROUP_NAME
+
     @cachetools.func.ttl_cache(ttl=3)
     def get_children(self):
-        children = []
-        for kind, resource in self.resources.items():
-            node = KindNode(resource, self.namespace)
-            if EXCLUDE_EMPTY_KINDS and len(node.get_children()) == 0:
-                continue
-            children.append(node)
+        children = [KindNode(resource, self.namespace) for resource in self.resources.values()]
+        if EXCLUDE_EMPTY_KINDS:
+            children = _filter_empty(children, per_resource_pool)
         return children
 
 
@@ -187,3 +191,14 @@ def _time_iso2posix(iso):
     iso = iso.replace('Z', '+00:00')
     dt = datetime.datetime.fromisoformat(iso)
     return int(dt.timestamp())
+
+
+def _filter_empty(nodes, pool):
+    def node_filter(node):
+        if len(node.get_children()) == 0:
+            return None
+        else:
+            return node
+
+    nodes = pool.map(node_filter, nodes)
+    return [n for n in nodes if n is not None]
