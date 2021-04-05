@@ -1,6 +1,5 @@
 import datetime
 import threading
-import functools
 
 import cachetools.func
 
@@ -9,8 +8,11 @@ from utils.kubernetes.watch import KubeWatcher, WatchEventType
 
 
 UNKNOWN = type('UNKNOWN', (), {})()
+
 GLOBAL_PSEUDO_NAMESPACE = '_'
 CORE_RESOURCE_GROUP_NAME = '_'
+EXCLUDE_EMPTY_KINDS = True
+EXCLUDE_EMPTY_RESOURCE_GROUPS = True
 
 
 class Node:
@@ -74,7 +76,7 @@ class NamespaceNode(Node):
         else:
             return GLOBAL_PSEUDO_NAMESPACE
 
-    @functools.cache
+    @cachetools.func.ttl_cache(ttl=3)
     def get_children(self):
         if self.namespace:
             resource_groups = kube.namespaced_resources
@@ -85,7 +87,10 @@ class NamespaceNode(Node):
         for resource_group_name, resources in resource_groups.items():
             if not resource_group_name:
                 resource_group_name = CORE_RESOURCE_GROUP_NAME
-            children.append(ResourceGroupNode(resource_group_name, resources, self.namespace))
+            node = ResourceGroupNode(resource_group_name, resources, self.namespace)
+            if EXCLUDE_EMPTY_RESOURCE_GROUPS and len(node.get_children()) == 0:
+                continue
+            children.append(node)
 
         return children
 
@@ -108,11 +113,14 @@ class ResourceGroupNode(Node):
         self.resources = resources
         self.namespace = namespace
 
-    @functools.cache
+    @cachetools.func.ttl_cache(ttl=3)
     def get_children(self):
         children = []
         for kind, resource in self.resources.items():
-            children.append(KindNode(resource, self.namespace))
+            node = KindNode(resource, self.namespace)
+            if EXCLUDE_EMPTY_KINDS and len(node.get_children()) == 0:
+                continue
+            children.append(node)
         return children
 
 
