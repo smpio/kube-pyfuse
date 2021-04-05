@@ -1,5 +1,6 @@
 import datetime
 import threading
+import itertools
 from multiprocessing.pool import ThreadPool
 
 import cachetools.func
@@ -16,7 +17,8 @@ CACHE_TTL_SECONDS = 5
 EXCLUDE_EMPTY_KINDS = True
 EXCLUDE_EMPTY_RESOURCE_GROUPS = True
 EXPAND_CORE_RESOURCE_GROUP = True
-PREFIX_RESOURCE_GROUPS = EXPAND_CORE_RESOURCE_GROUP
+EXPAND_UNDOTTED_RESOURCE_GROUPS = True
+PREFIX_RESOURCE_GROUPS = EXPAND_CORE_RESOURCE_GROUP or EXPAND_UNDOTTED_RESOURCE_GROUPS
 MAX_PARALLEL_REQUESTS = 20
 
 per_resource_group_pool = ThreadPool(100)
@@ -93,15 +95,20 @@ class NamespaceNode(Node):
 
         children = [ResourceGroupNode(resource_group_name, resources, self.namespace)
                     for resource_group_name, resources in resource_groups.items()
-                    if not EXPAND_CORE_RESOURCE_GROUP or resource_group_name != '']
+                    if (not EXPAND_CORE_RESOURCE_GROUP or resource_group_name != '')
+                    and (not EXPAND_UNDOTTED_RESOURCE_GROUPS or '.' in resource_group_name)]
         if EXCLUDE_EMPTY_RESOURCE_GROUPS:
             children = _filter_empty(children, per_resource_group_pool)
 
         children2 = []
-
-        if EXPAND_CORE_RESOURCE_GROUP:
+        if EXPAND_UNDOTTED_RESOURCE_GROUPS:
+            children2 += list(itertools.chain.from_iterable((
+                (KindNode(resource, self.namespace) for resource in resources.values()) for resources in (
+                    resources for resource_group_name, resources in resource_groups.items()
+                    if '.' not in resource_group_name)
+            )))
+        elif EXPAND_CORE_RESOURCE_GROUP:
             children2 += [KindNode(resource, self.namespace) for resource in resource_groups[''].values()]
-
         if EXCLUDE_EMPTY_KINDS:
             children2 = _filter_empty(children2, per_resource_pool)
 
