@@ -15,6 +15,8 @@ CORE_RESOURCE_GROUP_NAME = '_'
 CACHE_TTL_SECONDS = 5
 EXCLUDE_EMPTY_KINDS = True
 EXCLUDE_EMPTY_RESOURCE_GROUPS = True
+EXPAND_CORE_RESOURCE_GROUP = True
+PREFIX_RESOURCE_GROUPS = EXPAND_CORE_RESOURCE_GROUP
 MAX_PARALLEL_REQUESTS = 20
 
 per_resource_group_pool = ThreadPool(100)
@@ -90,10 +92,20 @@ class NamespaceNode(Node):
             resource_groups = kube.global_resources
 
         children = [ResourceGroupNode(resource_group_name, resources, self.namespace)
-                    for resource_group_name, resources in resource_groups.items()]
+                    for resource_group_name, resources in resource_groups.items()
+                    if not EXPAND_CORE_RESOURCE_GROUP or resource_group_name != '']
         if EXCLUDE_EMPTY_RESOURCE_GROUPS:
             children = _filter_empty(children, per_resource_group_pool)
-        return children
+
+        children2 = []
+
+        if EXPAND_CORE_RESOURCE_GROUP:
+            children2 += [KindNode(resource, self.namespace) for resource in resource_groups[''].values()]
+
+        if EXCLUDE_EMPTY_KINDS:
+            children2 = _filter_empty(children2, per_resource_pool)
+
+        return children + children2
 
     def get_stat(self):
         if not self.namespace:
@@ -117,7 +129,10 @@ class ResourceGroupNode(Node):
     @property
     def name(self):
         if self.group_name:
-            return self.group_name
+            if PREFIX_RESOURCE_GROUPS:
+                return '_' + self.group_name
+            else:
+                return self.group_name
         else:
             return CORE_RESOURCE_GROUP_NAME
 
