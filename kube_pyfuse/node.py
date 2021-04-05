@@ -18,7 +18,6 @@ class Node:
     name = UNKNOWN
 
     # implement only if is_dir=True
-    # TODO: return dict and remove name property
     def get_children(self):
         raise NotImplementedError
 
