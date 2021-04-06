@@ -6,6 +6,7 @@ import itertools
 import fuse
 
 from . import node
+from utils.collections import AutocleaningDefaultdict
 
 fuse.fuse_python_api = (0, 2)
 
@@ -24,6 +25,7 @@ class KubeFS(fuse.Fuse):
         self.root_node = node.RootNode()
         self.file_class = create_kube_file_class(self)
         self._buffers = {}
+        self._open_counters = AutocleaningDefaultdict(int)
 
     def _path2node(self, path):
         path = path[1:]  # remove leading slash
@@ -87,6 +89,7 @@ def create_kube_file_class(_kubefs):
             self.node = self.kubefs._path2node(path)
 
             self.is_dirty = False
+            self.kubefs._open_counters[self.path] += 1
 
             if flags & os.O_TRUNC:
                 self.ftruncate(0)
@@ -104,9 +107,6 @@ def create_kube_file_class(_kubefs):
             self.kubefs._buffers[self.path] = data
             self.is_dirty = True
 
-        def _drop_buffer(self):
-            self.kubefs._buffers.pop(self.path, None)
-
         def read(self, size, offset):
             print(hex(id(self)), 'read', size, offset)
             return self._buffer[offset:offset+size]
@@ -120,7 +120,9 @@ def create_kube_file_class(_kubefs):
         def release(self, flags):
             print(hex(id(self)), 'release')
             # TODO: flush
-            self._drop_buffer()
+            self.kubefs._open_counters[self.path] -= 1
+            if self.kubefs._open_counters[self.path] == 0:
+                self.kubefs._buffers.pop(self.path, None)
 
         def flush(self):
             print(hex(id(self)), 'flush')
