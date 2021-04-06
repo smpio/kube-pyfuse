@@ -137,26 +137,7 @@ def create_kube_file_class(_kubefs):
 
         def fgetattr(self):
             print(hex(id(self)), 'getattr')
-            st = fuse.Stat()
-            st.st_mode = stat.S_IFREG | 0o666
-            st.st_nlink = 1
-
-            nstat = self.node.get_stat()
-            for k, v in nstat.items():
-                setattr(st, k, v)
-
-            if self.buf is not None:
-                st.st_size = len(self.buf)
-            else:
-                try:
-                    size = self.kubefs.truncated_files[self.path]
-                except KeyError:
-                    pass
-                else:
-                    st.st_size = size
-
-            print('st_size', st.st_size)
-            return st
+            return self.kubefs.getattr(self.path)
 
         def ftruncate(self, size):
             print(hex(id(self)), 'ftruncate', size)
