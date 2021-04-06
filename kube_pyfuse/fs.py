@@ -12,7 +12,6 @@ from utils.collections import AutocleaningDefaultdict
 fuse.fuse_python_api = (0, 2)
 
 # TODO: add typing + flake checks
-# TODO: handle all errors and convert them to FSError
 
 
 class FSError(OSError):
