@@ -23,7 +23,7 @@ class KubeFS(fuse.Fuse):
         super().__init__(*args, **kwargs)
         self.root_node = node.RootNode()
         self.file_class = create_kube_file_class(self)
-        self.buffers = {}
+        self._buffers = {}
 
     def _path2node(self, path):
         path = path[1:]  # remove leading slash
@@ -70,7 +70,7 @@ class KubeFS(fuse.Fuse):
             setattr(st, k, v)
 
         try:
-            st.st_size = len(self.buffers[path])
+            st.st_size = len(self._buffers[path])
         except KeyError:
             pass
 
@@ -94,18 +94,18 @@ def create_kube_file_class(_kubefs):
         @property
         def _buffer(self):
             try:
-                data = self.kubefs.buffers[self.path]
+                data = self.kubefs._buffers[self.path]
             except KeyError:
-                data = self.kubefs.buffers[self.path] = self.node.read()
+                data = self.kubefs._buffers[self.path] = self.node.read()
             return data
 
         @_buffer.setter
         def _buffer(self, data):
-            self.kubefs.buffers[self.path] = data
+            self.kubefs._buffers[self.path] = data
             self.is_dirty = True
 
         def _drop_buffer(self):
-            self.kubefs.buffers.pop(self.path, None)
+            self.kubefs._buffers.pop(self.path, None)
 
         def read(self, size, offset):
             print(hex(id(self)), 'read', size, offset)
