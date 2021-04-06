@@ -144,13 +144,10 @@ def create_kube_file_class(_kubefs):
 
         def release(self, flags):
             print(hex(id(self)), 'release')
-            try:
-                self.flush()
-            finally:
-                self.is_dirty = False
-                self.kubefs._open_counters[self.path] -= 1
-                if self.kubefs._open_counters[self.path] == 0:
-                    self.kubefs._buffers.pop(self.path, None)
+            self.is_dirty = False
+            self.kubefs._open_counters[self.path] -= 1
+            if self.kubefs._open_counters[self.path] == 0:
+                self.kubefs._buffers.pop(self.path, None)
 
         def flush(self):
             print(hex(id(self)), 'flush')
@@ -158,10 +155,6 @@ def create_kube_file_class(_kubefs):
                 return
             self.node.write(self._buffer)
             self.is_dirty = False
-
-        def fsync(self, isfsyncfile):
-            print(hex(id(self)), 'fsync')
-            self.flush()
 
         def fgetattr(self):
             print(hex(id(self)), 'getattr')
