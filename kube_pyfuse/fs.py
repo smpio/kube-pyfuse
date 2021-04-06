@@ -23,7 +23,7 @@ class KubeFS(fuse.Fuse):
         super().__init__(*args, **kwargs)
         self.root_node = node.RootNode()
         self.file_class = create_kube_file_class(self)
-        self.truncated_files = {}
+        self.buffers = {}
 
     def _path2node(self, path):
         path = path[1:]  # remove leading slash
@@ -70,11 +70,9 @@ class KubeFS(fuse.Fuse):
             setattr(st, k, v)
 
         try:
-            size = self.truncated_files[path]
+            st.st_size = len(self.buffers[path])
         except KeyError:
             pass
-        else:
-            st.st_size = size
 
         return st
 
@@ -89,40 +87,40 @@ def create_kube_file_class(_kubefs):
             self.node = self.kubefs._path2node(path)
 
             self.is_dirty = False
-            self.buf = None
 
             if flags & os.O_TRUNC:
                 self.ftruncate(0)
 
-        def _ensure_buf(self):
-            if self.buf is not None:
-                return
-
-            self.buf = self.node.read()
+        @property
+        def _buffer(self):
             try:
-                len = self.kubefs.truncated_files[self.path]
+                data = self.kubefs.buffers[self.path]
             except KeyError:
-                pass
-            else:
-                self.buf = self.buf[:len]
+                data = self.kubefs.buffers[self.path] = self.node.read()
+            return data
+
+        @_buffer.setter
+        def _buffer(self, data):
+            self.kubefs.buffers[self.path] = data
+            self.is_dirty = True
+
+        def _drop_buffer(self):
+            self.kubefs.buffers.pop(self.path, None)
 
         def read(self, size, offset):
             print(hex(id(self)), 'read', size, offset)
-            self._ensure_buf()
-            return self.buf[offset:offset+size]
+            return self._buffer[offset:offset+size]
 
-        def write(self, buf, offset):
-            print(hex(id(self)), 'write', len(buf), offset)
-            print(repr(buf))
-            self._ensure_buf()
-            self.is_dirty = True
-            self.buf = self.buf[:offset] + buf + self.buf[offset+len(buf):]
-            self.kubefs.truncated_files.pop(self.path, None)
-            return len(buf)
+        def write(self, data, offset):
+            print(hex(id(self)), 'write', len(data), offset)
+            print(repr(data))
+            self._buffer = self._buffer[:offset] + data + self._buffer[offset+len(data):]
+            return len(data)
 
         def release(self, flags):
             print(hex(id(self)), 'release')
             # TODO: flush
+            self._drop_buffer()
 
         def flush(self):
             print(hex(id(self)), 'flush')
@@ -141,8 +139,9 @@ def create_kube_file_class(_kubefs):
 
         def ftruncate(self, size):
             print(hex(id(self)), 'ftruncate', size)
-            self.kubefs.truncated_files[self.path] = size
-            if self.buf is not None:
-                self.buf = self.buf[:size]
+            if size == 0:
+                self._buffer = b''
+            else:
+                self._buffer = self._buffer[:size]
 
     return KubeFile
