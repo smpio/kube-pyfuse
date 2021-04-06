@@ -71,5 +71,12 @@ class Kube:
         }, auth_settings=['BearerToken'], response_type=object)
         return ret[0]
 
+    def put_url(self, url, body, content_type='application/json', request_content_type='application/json'):
+        ret = self.client.call_api(url, 'PUT', header_params={
+            'Accept': content_type,
+            'Content-Type': request_content_type,
+        }, auth_settings=['BearerToken'], response_type=object, body=body)
+        return ret[0]
+
 
 kube = Kube()

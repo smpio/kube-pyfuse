@@ -4,6 +4,7 @@ import errno
 import itertools
 
 import fuse
+import kubernetes
 
 from . import node
 from utils.collections import AutocleaningDefaultdict
@@ -11,6 +12,7 @@ from utils.collections import AutocleaningDefaultdict
 fuse.fuse_python_api = (0, 2)
 
 # TODO: add typing + flake checks
+# TODO: handle all errors and convert them to FSError
 
 
 class FSError(OSError):
@@ -36,7 +38,7 @@ class KubeFS(fuse.Fuse):
         n = self.root_node
         for path_part in path_parts:
             if not n.is_dir:
-                raise FSError(errno.EACCES)
+                raise FSError(errno.ENOTDIR)
             children = {child.name: child for child in n.get_children()}
             try:
                 n = children[path_part]
@@ -49,7 +51,7 @@ class KubeFS(fuse.Fuse):
         n = self._path2node(path)
 
         if not n.is_dir:
-            return -errno.EACCES
+            return -errno.ENOTDIR
 
         return itertools.chain(
             (fuse.Direntry('.'), fuse.Direntry('..')),
@@ -119,21 +121,36 @@ def create_kube_file_class(_kubefs):
 
         def release(self, flags):
             print(hex(id(self)), 'release')
-            # TODO: flush
-            self.kubefs._open_counters[self.path] -= 1
-            if self.kubefs._open_counters[self.path] == 0:
-                self.kubefs._buffers.pop(self.path, None)
+            try:
+                self.flush()
+            finally:
+                self.is_dirty = False
+                self.kubefs._open_counters[self.path] -= 1
+                if self.kubefs._open_counters[self.path] == 0:
+                    self.kubefs._buffers.pop(self.path, None)
 
         def flush(self):
             print(hex(id(self)), 'flush')
             if not self.is_dirty:
                 return
-            # TODO: write
+            try:
+                self.node.write(self._buffer)
+            except kubernetes.client.exceptions.ApiException as err:
+                if err.status == 400:
+                    # invalid request
+                    print(err)
+                    raise FSError(errno.EINVAL) from err
+                elif err.status == 422:
+                    # invalid manifest
+                    print(err)
+                    raise FSError(errno.EINVAL) from err
+                else:
+                    raise err
             self.is_dirty = False
 
         def fsync(self, isfsyncfile):
             print(hex(id(self)), 'fsync')
-            # TODO: flush
+            self.flush()
 
         def fgetattr(self):
             print(hex(id(self)), 'getattr')

@@ -37,6 +37,10 @@ class Node:
     def read(self):
         raise NotImplementedError
 
+    # implement only if is_dir=False
+    def write(self, data):
+        raise NotImplementedError
+
     def get_stat(self):
         return {}
 
@@ -185,6 +189,10 @@ class ObjectNode(Node):
     def read(self):
         text = kube.get_url(self.obj['metadata']['selfLink'], content_type='application/yaml')
         return text.encode('utf8')
+
+    def write(self, data):
+        ret = kube.put_url(self.obj['metadata']['selfLink'], data, request_content_type='application/yaml')
+        print(ret)
 
     def get_stat(self):
         stat = {
