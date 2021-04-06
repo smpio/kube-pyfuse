@@ -29,6 +29,29 @@ class KubeFS(fuse.Fuse):
         self._buffers = {}
         self._open_counters = AutocleaningDefaultdict(int)
 
+    def lowwrap(self, fname):
+        fun = super().lowwrap(fname)
+
+        def wrapper(*args, **kwargs):
+            try:
+                return fun(*args, **kwargs)
+            except kubernetes.client.exceptions.ApiException as err:
+                print('Kubernetes error:', err)
+                if err.status == 400:
+                    # invalid request
+                    raise FSError(errno.EINVAL) from err
+                if err.status == 404:
+                    # invalid request
+                    raise FSError(errno.ENOENT) from err
+                elif err.status == 422:
+                    # invalid manifest
+                    raise FSError(errno.EINVAL) from err
+                else:
+                    # other errors
+                    raise FSError(errno.EIO) from err
+
+        return wrapper
+
     def _path2node(self, path):
         path = path[1:]  # remove leading slash
         path_parts = path.split('/')
@@ -133,19 +156,7 @@ def create_kube_file_class(_kubefs):
             print(hex(id(self)), 'flush')
             if not self.is_dirty:
                 return
-            try:
-                self.node.write(self._buffer)
-            except kubernetes.client.exceptions.ApiException as err:
-                if err.status == 400:
-                    # invalid request
-                    print(err)
-                    raise FSError(errno.EINVAL) from err
-                elif err.status == 422:
-                    # invalid manifest
-                    print(err)
-                    raise FSError(errno.EINVAL) from err
-                else:
-                    raise err
+            self.node.write(self._buffer)
             self.is_dirty = False
 
         def fsync(self, isfsyncfile):
