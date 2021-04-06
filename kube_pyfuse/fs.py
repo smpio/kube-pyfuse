@@ -1,4 +1,5 @@
 import os
+import sys
 import stat
 import errno
 import itertools
@@ -12,12 +13,6 @@ from utils.collections import AutocleaningDefaultdict
 fuse.fuse_python_api = (0, 2)
 
 # TODO: add typing + flake checks
-
-
-class FSError(OSError):
-    def __init__(self, errno):
-        super().__init__(errno, os.strerror(errno))
-        self.errno = errno
 
 
 class KubeFS(fuse.Fuse):
@@ -35,7 +30,7 @@ class KubeFS(fuse.Fuse):
             try:
                 return fun(*args, **kwargs)
             except kubernetes.client.exceptions.ApiException as err:
-                print('Kubernetes error:', err)
+                print('Kubernetes error:', err, file=sys.stderr)
                 if err.status == 400:
                     # invalid request
                     raise FSError(errno.EINVAL) from err
@@ -108,7 +103,8 @@ def create_kube_file_class(_kubefs):
         kubefs = _kubefs
 
         def __init__(self, path, flags, *args):
-            print(hex(id(self)), 'init', path, oct(flags))
+            debug(hex(id(self)), 'init', path, hex(flags), *args)
+
             self.path = path
             self.node = self.kubefs._path2node(path)
 
@@ -132,38 +128,47 @@ def create_kube_file_class(_kubefs):
             self.is_dirty = True
 
         def read(self, size, offset):
-            print(hex(id(self)), 'read', size, offset)
+            debug(hex(id(self)), 'read', size, offset)
             return self._buffer[offset:offset+size]
 
         def write(self, data, offset):
-            print(hex(id(self)), 'write', len(data), offset)
-            print(repr(data))
+            debug(hex(id(self)), 'write', offset, repr(data))
             self._buffer = self._buffer[:offset] + data + self._buffer[offset+len(data):]
             return len(data)
 
         def release(self, flags):
-            print(hex(id(self)), 'release')
+            debug(hex(id(self)), 'release')
             self.is_dirty = False
             self.kubefs._open_counters[self.path] -= 1
             if self.kubefs._open_counters[self.path] == 0:
                 self.kubefs._buffers.pop(self.path, None)
 
         def flush(self):
-            print(hex(id(self)), 'flush')
+            debug(hex(id(self)), 'flush')
             if not self.is_dirty:
                 return
             self.node.write(self._buffer)
             self.is_dirty = False
 
         def fgetattr(self):
-            print(hex(id(self)), 'getattr')
+            debug(hex(id(self)), 'getattr')
             return self.kubefs.getattr(self.path)
 
         def ftruncate(self, size):
-            print(hex(id(self)), 'ftruncate', size)
+            debug(hex(id(self)), 'ftruncate', size)
             if size == 0:
                 self._buffer = b''
             else:
                 self._buffer = self._buffer[:size]
 
     return KubeFile
+
+
+class FSError(OSError):
+    def __init__(self, errno):
+        super().__init__(errno, os.strerror(errno))
+        self.errno = errno
+
+
+def debug(*args):
+    print(*args, file=sys.stderr)

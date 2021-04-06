@@ -191,8 +191,7 @@ class ObjectNode(Node):
         return text.encode('utf8')
 
     def write(self, data):
-        ret = kube.put_url(self.obj['metadata']['selfLink'], data, request_content_type='application/yaml')
-        print(ret)
+        kube.put_url(self.obj['metadata']['selfLink'], data, request_content_type='application/yaml')
 
     def get_stat(self):
         stat = {
