@@ -1,0 +1,5 @@
+* fake mtime (for vim and other apps depending on this)
+* desktop notification about errors
+* create
+* delete
+* copy (clean)

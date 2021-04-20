@@ -1,0 +1,24 @@
+<plist version="1.0">
+    <dict>
+        <key>Label</key>
+            <string>local.kube-pyfuse</string>
+        <key>ProgramArguments</key>
+            <array>
+                <string>/WORKDIR/venv/bin/python</string>
+                <string>-m</string>
+                <string>kube_pyfuse</string>
+                <string>-f</string>
+                <string>-o</string>
+                <string>volname=kube</string>
+                <string>/MOUNTDIR</string>
+            </array>
+        <key>KeepAlive</key>
+            <true/>
+        <key>WorkingDirectory</key>
+            <string>/WORKDIR</string>
+        <key>StandardOutPath</key>
+            <string>/WORKDIR/kube-pyfuse.stdout</string>
+        <key>StandardErrorPath</key>
+            <string>/WORKDIR/kube-pyfuse.stderr</string>
+    </dict>
+</plist> 
